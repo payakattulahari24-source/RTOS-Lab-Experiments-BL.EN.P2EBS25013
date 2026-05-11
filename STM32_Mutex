@@ -1,0 +1,369 @@
+#include "main.h"
+#include "FreeRTOS.h"
+#include "task.h"
+#include "semphr.h"
+#include <stdio.h>
+#include <string.h>
+
+/* USER CODE BEGIN Includes */
+
+/* USER CODE END Includes */
+
+/* Private variables ---------------------------------------------------------*/
+UART_HandleTypeDef huart2;
+
+/* USER CODE BEGIN PV */
+
+SemaphoreHandle_t xMutex;
+
+TaskHandle_t PrintTask1Handle = NULL;
+TaskHandle_t PrintTask2Handle = NULL;
+TaskHandle_t SameTask1Handle = NULL;
+TaskHandle_t SameTask2Handle = NULL;
+TaskHandle_t LEDTask1Handle = NULL;
+TaskHandle_t LEDTask2Handle = NULL;
+
+/*
+   NOTE:
+   No-delay tasks are written below for observation.
+   They are NOT created in main by default because they can dominate the CPU.
+   To test no-delay behavior, uncomment their xTaskCreate() lines in main().
+*/
+
+TaskHandle_t NoDelayTask1Handle = NULL;
+TaskHandle_t NoDelayTask2Handle = NULL;
+
+/* USER CODE END PV */
+
+/* Private function prototypes -----------------------------------------------*/
+void SystemClock_Config(void);
+static void MX_GPIO_Init(void);
+static void MX_USART2_UART_Init(void);
+
+/* USER CODE BEGIN PFP */
+
+void UART_Print(char *msg);
+
+void Print_Task1(void *argument);
+void Print_Task2(void *argument);
+
+void SamePriority_Task1(void *argument);
+void SamePriority_Task2(void *argument);
+
+void NoDelay_Task1(void *argument);
+void NoDelay_Task2(void *argument);
+
+void LED_Task1(void *argument);
+void LED_Task2(void *argument);
+
+/* USER CODE END PFP */
+
+/* USER CODE BEGIN 0 */
+
+/* Mutex protected UART print function */
+void UART_Print(char *msg)
+{
+    if (xMutex != NULL)
+    {
+        if (xSemaphoreTake(xMutex, portMAX_DELAY) == pdTRUE)
+        {
+            HAL_UART_Transmit(&huart2,
+                              (uint8_t *)msg,
+                              strlen(msg),
+                              HAL_MAX_DELAY);
+
+            xSemaphoreGive(xMutex);
+        }
+    }
+}
+
+/* Objective 1: Two different tasks printing different messages */
+void Print_Task1(void *argument)
+{
+    while (1)
+    {
+        UART_Print("Objective 1 - Task 1: Hello from first task\r\n");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+void Print_Task2(void *argument)
+{
+    while (1)
+    {
+        UART_Print("Objective 1 - Task 2: Hello from second task\r\n");
+        vTaskDelay(pdMS_TO_TICKS(1200));
+    }
+}
+
+/* Objective 3: Same priority tasks */
+void SamePriority_Task1(void *argument)
+{
+    while (1)
+    {
+        UART_Print("Objective 3 - Same Priority Task 1 is running\r\n");
+        vTaskDelay(pdMS_TO_TICKS(1500));
+    }
+}
+
+void SamePriority_Task2(void *argument)
+{
+    while (1)
+    {
+        UART_Print("Objective 3 - Same Priority Task 2 is running\r\n");
+        vTaskDelay(pdMS_TO_TICKS(1500));
+    }
+}
+
+/* Objective 4: Tasks without delay */
+void NoDelay_Task1(void *argument)
+{
+    while (1)
+    {
+        UART_Print("Objective 4 - No Delay High Priority Task 1 running\r\n");
+    }
+}
+
+void NoDelay_Task2(void *argument)
+{
+    while (1)
+    {
+        UART_Print("Objective 4 - No Delay Low Priority Task 2 running\r\n");
+    }
+}
+
+/* Objective 5: LED blinking tasks with critical section for printing */
+void LED_Task1(void *argument)
+{
+    while (1)
+    {
+        HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+
+        UART_Print("Objective 5 - LED Task 1: Printing inside critical section\r\n");
+
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+}
+
+void LED_Task2(void *argument)
+{
+    while (1)
+    {
+        HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+
+        UART_Print("Objective 5 - LED Task 2: Printing inside critical section\r\n");
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+/* USER CODE END 0 */
+
+int main(void)
+{
+    /* MCU Configuration--------------------------------------------------------*/
+
+    HAL_Init();
+
+    SystemClock_Config();
+
+    MX_GPIO_Init();
+    MX_USART2_UART_Init();
+
+    /* USER CODE BEGIN 2 */
+
+    char buffer[150];
+
+    xMutex = xSemaphoreCreateMutex();
+
+    sprintf(buffer, "\r\nMutex handle value = %p\r\n", (void *)xMutex);
+    HAL_UART_Transmit(&huart2,
+                      (uint8_t *)buffer,
+                      strlen(buffer),
+                      HAL_MAX_DELAY);
+
+    if (xMutex != NULL)
+    {
+        HAL_UART_Transmit(&huart2,
+                          (uint8_t *)"Mutex created successfully\r\n",
+                          strlen("Mutex created successfully\r\n"),
+                          HAL_MAX_DELAY);
+    }
+    else
+    {
+        HAL_UART_Transmit(&huart2,
+                          (uint8_t *)"Mutex creation failed\r\n",
+                          strlen("Mutex creation failed\r\n"),
+                          HAL_MAX_DELAY);
+    }
+
+    /*
+       Objective 1:
+       Two different tasks print two different messages
+       using the same shared UART printer.
+    */
+    xTaskCreate(Print_Task1,
+                "PrintTask1",
+                128,
+                NULL,
+                2,
+                &PrintTask1Handle);
+
+    xTaskCreate(Print_Task2,
+                "PrintTask2",
+                128,
+                NULL,
+                1,
+                &PrintTask2Handle);
+
+    /*
+       Objective 3:
+       Same priority tasks.
+       Both tasks are assigned priority 2.
+    */
+    xTaskCreate(SamePriority_Task1,
+                "SameTask1",
+                128,
+                NULL,
+                2,
+                &SameTask1Handle);
+
+    xTaskCreate(SamePriority_Task2,
+                "SameTask2",
+                128,
+                NULL,
+                2,
+                &SameTask2Handle);
+
+    /*
+       Objective 4:
+       No delay tasks.
+       These tasks are commented because they can continuously occupy the CPU.
+       To test this objective, uncomment the two xTaskCreate() lines below.
+       It is better to comment other task creation lines while testing no-delay tasks.
+    */
+
+    /*
+    xTaskCreate(NoDelay_Task1,
+                "NoDelay1",
+                128,
+                NULL,
+                3,
+                &NoDelayTask1Handle);
+
+    xTaskCreate(NoDelay_Task2,
+                "NoDelay2",
+                128,
+                NULL,
+                1,
+                &NoDelayTask2Handle);
+    */
+
+    /*
+       Objective 5:
+       Two LED blinking tasks with mutex protected UART printing.
+       LED Task 1 has higher priority than LED Task 2.
+    */
+    xTaskCreate(LED_Task1,
+                "LEDTask1",
+                128,
+                NULL,
+                3,
+                &LEDTask1Handle);
+
+    xTaskCreate(LED_Task2,
+                "LEDTask2",
+                128,
+                NULL,
+                1,
+                &LEDTask2Handle);
+
+    vTaskStartScheduler();
+
+    /* USER CODE END 2 */
+
+    while (1)
+    {
+    }
+}
+
+/**
+  * @brief System Clock Configuration
+  * @retval None
+  */
+void SystemClock_Config(void)
+{
+    /*
+       This function is normally generated by STM32CubeIDE.
+       Keep your own CubeIDE-generated SystemClock_Config() function here.
+
+       Do not leave this function empty in your actual project.
+    */
+}
+
+/**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+    /*
+       This function is normally generated by STM32CubeIDE.
+       If you already have MX_USART2_UART_Init() in your main.c,
+       use the CubeIDE-generated version instead of this sample.
+    */
+
+    huart2.Instance = USART2;
+    huart2.Init.BaudRate = 115200;
+    huart2.Init.WordLength = UART_WORDLENGTH_8B;
+    huart2.Init.StopBits = UART_STOPBITS_1;
+    huart2.Init.Parity = UART_PARITY_NONE;
+    huart2.Init.Mode = UART_MODE_TX_RX;
+    huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+    huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+
+    if (HAL_UART_Init(&huart2) != HAL_OK)
+    {
+        Error_Handler();
+    }
+}
+
+/**
+  * @brief GPIO Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_GPIO_Init(void)
+{
+    /*
+       This GPIO code is for boards using LD2, such as STM32 Nucleo boards.
+       If CubeIDE already generated MX_GPIO_Init(), use that version.
+    */
+
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+
+    HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+
+    GPIO_InitStruct.Pin = LD2_Pin;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+
+    HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
+}
+
+/**
+  * @brief Error Handler
+  * @retval None
+  */
+void Error_Handler(void)
+{
+    __disable_irq();
+
+    while (1)
+    {
+    }
+}
