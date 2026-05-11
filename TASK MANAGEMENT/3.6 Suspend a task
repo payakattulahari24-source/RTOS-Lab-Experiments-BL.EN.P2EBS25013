@@ -1,0 +1,29 @@
+#include <Arduino_FreeRTOS.h>
+#define LED1 6
+TaskHandle_t Task1Handle;
+void Task1(void *pvParameters)
+{
+  pinMode(LED1, OUTPUT);
+  while (1)
+  {
+    digitalWrite(LED1, !digitalRead(LED1));
+    Serial.println("TASK1 Running")
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+  }
+void ControlTask(void *pvParameters)
+{
+  vTaskDelay(5000 / portTICK_PERIOD_MS);
+  Serial.println("Suspending TASK1");
+  // SUSPEND TASK
+  vTaskSuspend(Task1Handle);
+  while (1);
+}
+void setup()
+{
+  Serial.begin(9600);
+  xTaskCreate(Task1, "Task1", 128, NULL, 1, &Task1Handle);
+  xTaskCreate(ControlTask, "Control", 128, NULL, 2, NULL);
+}
+void loop()
+{
+}
